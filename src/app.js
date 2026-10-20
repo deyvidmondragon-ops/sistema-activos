@@ -7,11 +7,13 @@ const catalogosRoutes = require('./routes/catalogos.routes');
 const usuariosRoutes = require('./routes/usuarios.routes');
 const authRoutes = require('./routes/auth.routes');
 const { verificarToken, requerirRol } = require('./middleware/auth.middleware');
+const dashboardRoutes = require('./routes/dashboard.routes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(express.static('public'));
 
 // Rutas
 app.use('/api/activos', verificarToken, activosRoutes);
@@ -19,6 +21,7 @@ app.use('/api/mantenimientos', verificarToken, mantenimientosRoutes);
 app.use('/api/catalogos', verificarToken, catalogosRoutes);
 app.use('/api/usuarios', verificarToken, requerirRol('Administrador'), usuariosRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/dashboard', verificarToken, dashboardRoutes);
 
 // Ruta de prueba
 app.get('/', (req, res) => {

@@ -1,0 +1,282 @@
+
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel de Activos</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1720;
+    --panel: #161f2b;
+    --panel-2: #1c2733;
+    --border: #263341;
+    --text: #e7edf3;
+    --muted: #8ba0b3;
+    --accent: #3fa9f5;
+    --ok: #33c27f;
+    --warn: #e0a736;
+    --bad: #e0596b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 32px 24px 60px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+  .subt {
+    color: var(--muted);
+    font-size: 14px;
+    margin: 0 0 24px;
+  }
+  .login {
+    display: flex;
+    gap: 8px;
+    max-width: 640px;
+    margin-bottom: 28px;
+  }
+  .login input {
+    flex: 1;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .login button {
+    background: var(--accent);
+    border: none;
+    color: #06202f;
+    font-weight: 600;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .estado-sesion {
+    font-size: 12px;
+    color: var(--muted);
+    margin: -20px 0 24px;
+  }
+  .kpis {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+  .kpi {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px;
+  }
+  .kpi .num {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+  .kpi .lbl {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin-top: 4px;
+  }
+  .kpi.ok .num { color: var(--ok); }
+  .kpi.warn .num { color: var(--warn); }
+  .kpi.bad .num { color: var(--bad); }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px;
+  }
+  .card h2 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 14px;
+    color: var(--muted);
+  }
+  .card.wide { grid-column: 1 / -1; }
+  canvas { max-height: 260px; }
+  .vacio {
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 0;
+  }
+  @media (max-width: 720px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Panel de Activos y Mantenimiento</h1>
+<p class="subt">Vista operativa del inventario y el mantenimiento preventivo</p>
+
+<div class="login">
+  <input id="correo" type="email" placeholder="correo@ejemplo.com" value="admin@ejemplo.com">
+  <input id="password" type="password" placeholder="contraseña">
+  <button onclick="iniciarSesion()">Entrar</button>
+</div>
+<p class="estado-sesion" id="estadoSesion">Sin sesión iniciada.</p>
+
+<div id="contenido" style="display:none;">
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Activos por estado</h2>
+      <canvas id="chartEstado"></canvas>
+    </div>
+    <div class="card">
+      <h2>Activos por tipo</h2>
+      <canvas id="chartTipo"></canvas>
+    </div>
+    <div class="card wide">
+      <h2>Mantenimientos programados por mes</h2>
+      <canvas id="chartMes"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API_BASE = 'http://localhost:3000';
+let token = null;
+let charts = {};
+
+async function iniciarSesion() {
+  const correo = document.getElementById('correo').value;
+  const password = document.getElementById('password').value;
+  const estado = document.getElementById('estadoSesion');
+  estado.textContent = 'Iniciando sesión...';
+
+  try {
+    const resp = await fetch(`${API_BASE}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ correo, password })
+    });
+    const datos = await resp.json();
+
+    if (!resp.ok) {
+      estado.textContent = 'Error: ' + (datos.error || 'no se pudo iniciar sesión');
+      return;
+    }
+
+    token = datos.token;
+    estado.textContent = `Sesión activa como ${datos.usuario.nombre} (${datos.usuario.rol})`;
+    document.getElementById('contenido').style.display = 'block';
+    await cargarDashboard();
+  } catch (err) {
+    estado.textContent = 'No se pudo conectar con la API. ¿Está corriendo en ' + API_BASE + '?';
+  }
+}
+
+async function cargarDashboard() {
+  const resp = await fetch(`${API_BASE}/api/dashboard`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const datos = await resp.json();
+  if (!resp.ok) {
+    document.getElementById('estadoSesion').textContent = 'Error: ' + (datos.error || 'no se pudo cargar el panel');
+    return;
+  }
+  pintarKpis(datos);
+  try {
+    pintarGraficos(datos);
+  } catch (err) {
+    console.error('Error al dibujar los gráficos:', err);
+    document.getElementById('estadoSesion').textContent =
+      'Sesión activa, pero los gráficos no cargaron (revisa la consola del navegador con F12)';
+  }
+} 
+
+function pintarKpis(datos) {
+  const totalActivos = datos.activos_por_estado.reduce((s, r) => s + Number(r.total), 0);
+  const enMantenimiento = datos.activos_por_estado.find(r => r.estado === 'En mantenimiento')?.total || 0;
+  const c = datos.cumplimiento;
+
+  const kpis = [
+    { valor: totalActivos, etiqueta: 'Activos totales', clase: '' },
+    { valor: enMantenimiento, etiqueta: 'En mantenimiento ahora', clase: 'warn' },
+    { valor: c.pendientes, etiqueta: 'Mantenimientos pendientes', clase: 'warn' },
+    { valor: c.a_tiempo, etiqueta: 'Completados a tiempo', clase: 'ok' },
+    { valor: c.atrasados, etiqueta: 'Completados con atraso', clase: 'bad' },
+  ];
+
+  document.getElementById('kpis').innerHTML = kpis.map(k => `
+    <div class="kpi ${k.clase}">
+      <div class="num">${k.valor}</div>
+      <div class="lbl">${k.etiqueta}</div>
+    </div>
+  `).join('');
+}
+
+function pintarGraficos(datos) {
+  const paleta = ['#3fa9f5', '#33c27f', '#e0a736', '#e0596b', '#9b7fe0', '#4fd1c5'];
+
+  renderChart('chartEstado', 'doughnut',
+    datos.activos_por_estado.map(r => r.estado),
+    datos.activos_por_estado.map(r => r.total), paleta);
+
+  renderChart('chartTipo', 'bar',
+    datos.activos_por_tipo.map(r => r.tipo),
+    datos.activos_por_tipo.map(r => r.total), paleta);
+
+  renderChart('chartMes', 'line',
+    datos.mantenimientos_por_mes.map(r => r.mes),
+    datos.mantenimientos_por_mes.map(r => r.total), paleta);
+}
+
+function renderChart(id, tipo, labels, valores, paleta) {
+  const el = document.getElementById(id);
+  if (charts[id]) charts[id].destroy();
+
+  if (labels.length === 0) {
+    el.parentElement.innerHTML = '<h2 style="color:var(--muted);font-size:14px;margin:0 0 14px;">Sin datos aún</h2><p class="vacio">No hay registros para mostrar</p>';
+    return;
+  }
+
+  charts[id] = new Chart(el, {
+    type: tipo,
+    data: {
+      labels,
+      datasets: [{
+        data: valores,
+        backgroundColor: paleta,
+        borderColor: tipo === 'line' ? paleta[0] : 'transparent',
+        tension: 0.3,
+        fill: tipo === 'line' ? false : true,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: tipo === 'doughnut', labels: { color: '#e7edf3' } }
+      },
+      scales: tipo === 'doughnut' ? {} : {
+        x: { ticks: { color: '#8ba0b3' }, grid: { color: '#263341' } },
+        y: { ticks: { color: '#8ba0b3' }, grid: { color: '#263341' }, beginAtZero: true }
+      }
+    }
+  });
+}
+</script>
+
+</body>
+</html>
